@@ -71,6 +71,24 @@ class FFEReader:
             "vectorComponent": "total",
             "phasorComponent": "magnitude",
             "units": "dBi"
+        },
+        r'gain.*theta': {
+            "quantity": "gain",
+            "vectorComponent": "theta",
+            "phasorComponent": "magnitude",
+            "units": "dBi"
+        },
+        r'gain.*phi': {
+            "quantity": "gain",
+            "vectorComponent": "phi",
+            "phasorComponent": "magnitude",
+            "units": "dBi"
+        },
+        r'gain.*total': {
+            "quantity": "gain",
+            "vectorComponent": "total",
+            "phasorComponent": "magnitude",
+            "units": "dBi"
         }
     }
     # List of keys that are at the top level
@@ -99,7 +117,7 @@ class FFEReader:
         # Set to True at first, so we init a new dataset
         new_ds = True
         # Prime the dataset contents to None
-        ds = None
+        dataset = None
         # Header line identifier (compile here to speed things up)
         hl = re.compile(r'^(#|\*)')
         # For each line in the input file
@@ -109,51 +127,52 @@ class FFEReader:
             if FFEReader._is_header(hl, l):
                 # If this is the first header line after a full dataset ...
                 if new_ds:
-                    print("I found the first header in a new dataset!")
-                    # If this is not the first dataset ...
-                    if ds is not None:
+                    # If this is not the first dataset (e.g., 'dataset' already contains something)
+                    if dataset is not None:
                         # Append the previous dataset before moving on
-                        contents["data"].append(ds)
+                        contents["data"].append(dataset)
                     # Prime an empty dataset
-                    ds = {}
+                    dataset = {}
                     # Reset the new dataset flag
                     new_ds = False
                 # Parse the header line
-                d = FFEReader._parse_header(l)
-                # Determine if the rturned dict contains top-level keys or dataset-level keys
+                line = FFEReader._parse_header(l)
+                # Determine if the returned dict contains top-level keys or dataset-level keys
                 # and handle appropriately
-                for k in d.keys():
+                for k in line.keys():
                     # Is this a top-level key?
                     if k in FFEReader._top_level_keys:
                         # If the key already exists at the top level
                         if k in contents.keys():
                             # First, try to append it to a list
                             try:
-                                contents[k].append(d[k])
+                                contents[k].append(line[k])
                             # If that doesn't work, just overwrite it
                             except:
-                                contents[k] = d[k]
+                                contents[k] = line[k]
                         # If the key doesn't already exist at the top level
                         else:
-                            contents[k] = d[k]
+                            contents[k] = line[k]
                     # Is this a dataset-level key?
                     else:
-                        ds[k] = d[k]
+                        dataset[k] = line[k]
             # If not a header line, see what we can do with it
             else:
                 # Try to parse as a data line
-                d = FFEReader._parse_data_line(l)
+                line = FFEReader._parse_data_line(l)
                 # If we have data
-                if d is not None:
+                if line is not None:
+                    # Do some housework if this is the first row in a new dataset
                     if not new_ds:
-                        print("I found the first row of a new dataset!")
                         new_ds = True
                     # Append data to columns
-                    pass
+                    if len(dataset["data"]) == len(line):
+                        for i in range(len(line)):
+                            dataset["data"][i]["data"].append(line[i])
         # End of File
-        if ds is not None:
+        if dataset is not None:
             # Append the last dataset
-            contents["data"].append(ds)
+            contents["data"].append(dataset)
         # Return
         return contents
 
@@ -180,7 +199,8 @@ class FFEReader:
         # Strip leading comment marks and spaces
         l = re.sub(r'^(#|\*|\s)+', r'', line.lstrip().rstrip())
         # Test whether it's the column header line
-        if re.match(r'^"', l) or len(l) > 99:
+        # Right now, just see if it starts with a quote. There may be a more robust method.
+        if re.match(r'^"', l):
             c = FFEReader._parse_column_header(l)
             # Return the data array
             return {"data": c}
@@ -251,20 +271,24 @@ class FFEReader:
         cols = []
         # Strip out leading/trailing double-quotes
         # Split this row into the individual column headers
-        hdr = re.split(r'["|\s]+', line.lstrip().rstrip().lstrip('"').rstrip('"'))
+        hdrs = re.split(r'["|\s]+', line.lstrip().rstrip().lstrip('"').rstrip('"'))
         # Iterate through each column header
-        for l in hdr:
+        for hdr in hdrs:
+            # Default header
+            c = {"quantity": "unknown", "description": hdr}
+            # Prime the 'found a match' flag
             match = False
+            # Search the known header values for a match
             for k in FFEReader._col_hdr_map.keys():
                 # See if this column header matches a known header
-                if re.search(k, l, re.IGNORECASE):
+                if match == False and re.search(k, hdr, re.IGNORECASE):
                     # Add this column description to the list
-                    cols.append(FFEReader._col_hdr_map[k])
+                    c = FFEReader._col_hdr_map[k]
                     match = True
-            # Did we not match any known headers?
-            # If not, we still want to put the column in there so the data columns will match the headers
-            if not match:
-                cols.append({"quantity": "unknown", "description": l})
+            # Add a 'data' array to the column
+            c["data"] = []
+            # Add this column to the collection
+            cols.append(c)
         return cols
 
     @staticmethod
