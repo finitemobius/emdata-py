@@ -5,6 +5,7 @@ The canonical source for this package is https://github.com/finitemobius/emdata-
 The emdata format is maintained at https://github.com/finitemobius/emdata"""
 
 import re
+import copy
 
 __author__ = "Finite Mobius, LLC"
 __credits__ = ["Jason R. Miller"]
@@ -115,7 +116,7 @@ class FFEReader:
         }
         # Flag for determining when we've crossed a dataset boundary
         # Set to True at first, so we init a new dataset
-        new_ds = True
+        new_ds_on_next_header = True
         # Prime the dataset contents to None
         dataset = None
         # Header line identifier (compile here to speed things up)
@@ -126,15 +127,15 @@ class FFEReader:
             # Determine if this is a header line
             if FFEReader._is_header(hl, l):
                 # If this is the first header line after a full dataset ...
-                if new_ds:
+                if new_ds_on_next_header:
                     # If this is not the first dataset (e.g., 'dataset' already contains something)
                     if dataset is not None:
                         # Append the previous dataset before moving on
-                        contents["data"].append(dataset)
+                        contents["data"].append(copy.deepcopy(dataset))
                     # Prime an empty dataset
                     dataset = {}
                     # Reset the new dataset flag
-                    new_ds = False
+                    new_ds_on_next_header = False
                 # Parse the header line
                 line = FFEReader._parse_header(l)
                 # Determine if the returned dict contains top-level keys or dataset-level keys
@@ -163,8 +164,9 @@ class FFEReader:
                 # If we have data
                 if line is not None:
                     # Do some housework if this is the first row in a new dataset
-                    if not new_ds:
-                        new_ds = True
+                    if not new_ds_on_next_header:
+                        # Set this flag so the next time a header line is encountered, we create a new dataset
+                        new_ds_on_next_header = True
                     # Append data to columns
                     if len(dataset["data"]) == len(line):
                         for i in range(len(line)):
@@ -172,7 +174,7 @@ class FFEReader:
         # End of File
         if dataset is not None:
             # Append the last dataset
-            contents["data"].append(dataset)
+            contents["data"].append(copy.deepcopy(dataset))
         # Return
         return contents
 
@@ -201,9 +203,8 @@ class FFEReader:
         # Test whether it's the column header line
         # Right now, just see if it starts with a quote. There may be a more robust method.
         if re.match(r'^"', l):
-            c = FFEReader._parse_column_header(l)
             # Return the data array
-            return {"data": c}
+            return {"data": FFEReader._parse_column_header(l)}
         # Is this a key:value header? (contains a colon)
         elif re.search(r':', l):
             # Parse this line
